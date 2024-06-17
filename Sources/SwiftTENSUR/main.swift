@@ -17,14 +17,17 @@ let USAGE =
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15]
             [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
+            [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10]
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
     "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":true, "keepprobecentered":false,
-    "keepreentrant":true ]
+    "keepreentrant":true , 
+    "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10]
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
     "delta":"float", "epsilon":"float", "volumesample":"float","skipcavities":"bool",
-    "keepprobecentered":"bool", "keepreentrant":"bool" ]
+    "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
+    "smoothinglambda":"float" , "smoothingiters":"int"]
 
 
 // for simplicity assume paths to atomic coordinates and radii
@@ -447,6 +450,47 @@ func writeOBJ( _ path:String, _ subsurf:Int ) {
     }
 }
 
+func laplaciansmooth(_ subsurf:Int) {
+    let lambda = opts["smoothinglambda"]! as! Double 
+    let iters = opts["smoothingiters"]! as! Int 
+
+    // need adjacency 
+
+    var adj = [Set<Int>]()
+
+    for _ in 0..<SUBVERTICES[subsurf].count {
+        adj.append(Set<Int>())
+    }
+
+    for f in SUBFACES[subsurf] {
+        adj[f[0]].insert(f[1])
+        adj[f[1]].insert(f[0])
+        adj[f[0]].insert(f[2])
+        adj[f[2]].insert(f[0])
+        adj[f[1]].insert(f[2])
+        adj[f[2]].insert(f[1])
+
+    }
+
+    for iter in 0..<iters {
+        for iv in 0..<SUBVERTICES[subsurf].count {
+            var sumpos = Vector([0.0,0.0,0.0])
+
+            for n in adj[iv] {
+                sumpos = sumpos.add(SUBVERTICES[subsurf][n])
+            }
+
+            sumpos = sumpos.scale(1.0/Double(adj[iv].count))
+
+            let delta = sumpos.sub(SUBVERTICES[subsurf][iv]).scale(lambda)
+
+            SUBVERTICES[subsurf][iv] = SUBVERTICES[subsurf][iv].add(delta)
+        }
+    }
+
+
+}
+
 // write components out in obj format
 
 if opts["keepprobecentered"]! as! Bool {
@@ -474,6 +518,11 @@ if opts["keepreentrant"]! as! Bool {
             // invert vertex normals
 
             SUBNORMALS[subsurf] = SUBNORMALS[subsurf] .map { $0.scale(-1.0)}
+
+            if opts["laplaciansmoothing"]! as! Bool {
+                print("laplacian smoothing for subsurface \(subsurf)")
+                laplaciansmooth( subsurf )
+            }
 
             let outpath = "\(rootpath).tensur.reentrant.\(outcount).obj"
             print("write reentrant surface \(subsurf) to \(outpath)")
