@@ -5,7 +5,7 @@ import Foundation
 import SwiftTENSURTools
 import MathTools
 import Darwin
-import libpmp
+
 
 enum tensurError: Error {
     case parseError
@@ -14,7 +14,7 @@ enum tensurError: Error {
 
 let USAGE = 
 """
-USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <target # faces> <root out path>
+USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15]
             [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
 """
@@ -200,7 +200,7 @@ let optValues = argdata.2
 let opts = processOptArgs(optArgs, optValues)
 
 
-if baseArgs.count != 5 {
+if baseArgs.count != 4 {
     print(USAGE)
     exit(1)
 }
@@ -209,9 +209,7 @@ let coordpath = baseArgs[0]
 let radiipath = baseArgs[1]
 let proberad = Double(baseArgs[2])!
 
-let numfaces = Int(baseArgs[3])!
-
-let rootpath = baseArgs[4]
+let rootpath = baseArgs[3]
 
 var coordinates:[Vector]?
 var radii:[Double]?
@@ -456,7 +454,7 @@ if opts["keepprobecentered"]! as! Bool {
     var outcount = 0
 
     for subsurf in 0..<subsurfVOLUME.count {
-        if subsurfVOLUME[subsurf] > 0.0 {
+        if subsurfVOLUME[subsurf] < 0.0 {
             let outpath = "\(rootpath).tensur.probectr.\(outcount).obj"
             print("write probe-centered surface \(subsurf) to \(outpath)")
 
@@ -472,8 +470,8 @@ if opts["keepreentrant"]! as! Bool {
     var outcount = 0
 
     for subsurf in 0..<subsurfVOLUME.count {
-        if subsurfVOLUME[subsurf] < 0.0 {
-            // invert normals
+        if subsurfVOLUME[subsurf] > 0.0 {
+            // invert vertex normals
 
             SUBNORMALS[subsurf] = SUBNORMALS[subsurf] .map { $0.scale(-1.0)}
 
