@@ -317,31 +317,71 @@ for f in FACES {
 
 }
 
+//var visited = Array(repeating:false, count:VERTICES.count)
+//
+//func DFS(  _ v:Int, _ component: inout [Int] ) {
+//
+//    visited[v] = true
+//    component.append(v)
+//
+//    for j in adjacency[v] {
+//        if !visited[j] {
+//            DFS( j, &component)
+//        }
+//    }
+//}
+
+// to avoid recursion stack size issue, see if we can manage our own stack for component identification
+
+var STACK = [[Int]]()
+
 var visited = Array(repeating:false, count:VERTICES.count)
+var component = Array(repeating:-1, count:VERTICES.count)
 
-func DFS(  _ v:Int, _ component: inout [Int] ) {
+var currentComponent = -1
+var unassigned:Int?
 
-    visited[v] = true
-    component.append(v)
+while true {
+    //find first unassigned vertex
 
-    for j in adjacency[v] {
-        if !visited[j] {
-            DFS( j, &component)
+    unassigned = nil
+
+    for iv in 0..<VERTICES.count {
+        if component[iv] < 0 {
+            unassigned = iv
+            break
+        }
+    }
+    if unassigned == nil {
+        break
+    }
+
+    currentComponent += 1
+
+    STACK.append([unassigned!,currentComponent])
+
+    while STACK.count > 0 {
+        let data = STACK.popLast()!
+        if !visited[data[0]] {
+            visited[data[0]] = true 
+            component[data[0]] = data[1]
+            for iv in adjacency[data[0]] {
+                STACK.append([iv,currentComponent])
+            }
         }
     }
 }
 
 var components = [[Int]]()
 
-var component:[Int]?
-
-for i in 0..<VERTICES.count {
-    if !visited[i] {
-        component = [Int]()
-        DFS(i, &component!)
-        components.append(component!)
-    }
+for c in 0..<(currentComponent+1) {
+    components.append([Int]())
 }
+
+for (iv,c) in component.enumerated() {
+    components[c].append(iv)
+}
+
 
 print("\nsurface has \(components.count) components")
 
@@ -450,7 +490,63 @@ func writeOBJ( _ path:String, _ subsurf:Int ) {
     }
 }
 
-func laplaciansmooth(_ subsurf:Int) {
+func updateNormals(_ subsurf:Int) {
+
+    // vertex face adjaceny
+
+    var fadj = [Set<Int>]()
+
+    for iv in 0..<SUBVERTICES[subsurf].count {
+        fadj.append(Set<Int>())
+    }
+
+    for (fidx,f) in SUBFACES[subsurf].enumerated() {
+        fadj[f[0]].insert(fidx)
+        fadj[f[1]].insert(fidx)
+        fadj[f[2]].insert(fidx)
+    }
+
+    // assume counter-clockwise circulation to define face normal
+
+    var fnormals = [Vector]()
+    var fareas = [Double]()
+
+    var nviolate = 0
+
+    for (fidx,f) in SUBFACES[subsurf].enumerated() {
+        let r01 = SUBVERTICES[subsurf][f[1]].sub(SUBVERTICES[subsurf][f[0]])
+        let r02 = SUBVERTICES[subsurf][f[2]].sub(SUBVERTICES[subsurf][f[0]])
+        let n = r01.cross(r02)
+        let area = n.length()
+        var nnorm = n.scale(1.0/area)
+        fareas.append(area)
+        let normsum = SUBNORMALS[subsurf][f[0]].add(SUBNORMALS[subsurf][f[1]]).add(SUBNORMALS[subsurf][f[2]])
+        if nnorm.dot(normsum) < 0.0 {
+            nviolate += 1
+            nnorm = nnorm.scale(-1.0)
+        }
+        fnormals.append(nnorm)
+
+    }
+
+    // update vertex normals as average of adjacent face normals
+
+    for iv in 0..<SUBVERTICES[subsurf].count {
+        var avenorm = Vector([0.0, 0.0, 0.0])
+
+        for fidx in fadj[iv] {
+            avenorm = avenorm.add(fnormals[fidx])
+        }
+
+        avenorm = avenorm.scale(1.0/Double(fadj[iv].count))
+        SUBNORMALS[subsurf][iv] = avenorm
+    }
+
+    print("\nupdate vertices after laplacian smoothing, \(nviolate) faces violated ccw orientation")
+
+}
+
+func laplaciansmooth(_ subsurf:Int ) {
     let lambda = opts["smoothinglambda"]! as! Double 
     let iters = opts["smoothingiters"]! as! Int 
 
@@ -517,11 +613,13 @@ if opts["keepreentrant"]! as! Bool {
         if subsurfVOLUME[subsurf] > 0.0 {
             // invert vertex normals
 
-            SUBNORMALS[subsurf] = SUBNORMALS[subsurf] .map { $0.scale(-1.0)}
+            // SUBNORMALS[subsurf] = SUBNORMALS[subsurf] .map { $0.scale(-1.0)}
 
             if opts["laplaciansmoothing"]! as! Bool {
                 print("laplacian smoothing for subsurface \(subsurf)")
                 laplaciansmooth( subsurf )
+                print("update normals for subsurface \(subsurf)")
+                updateNormals(subsurf)
             }
 
             let outpath = "\(rootpath).tensur.reentrant.\(outcount).obj"
