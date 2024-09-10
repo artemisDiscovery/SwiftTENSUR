@@ -267,6 +267,32 @@ let time1 = Date().timeIntervalSince1970
 
 print("\nfinished generation of \(probes.count) probes, wallclock time = \(time1 - time0)")
 
+let probepath = "\(rootpath).tensur.probes.txt"
+print("\nwrite probes to \(probepath)")
+
+func writePROBES( _ path:String, _ probes:[Probe] ) {
+    let url = URL(fileURLWithPath: path )
+    var outstr = ""
+
+    for probe in probes {
+        outstr += "\(probe.center.coords[0]) \(probe.center.coords[1]) \(probe.center.coords[2])"
+        for aidx in probe.atoms {
+            outstr += " \(aidx)"
+        }
+        outstr += "\n"
+    }
+
+    do {
+        try outstr.write(to: url, atomically: true, encoding: String.Encoding.utf8)
+    } catch {
+        print("error writing probes file \(url)")
+    }
+
+}
+
+writePROBES( probepath, probes )
+
+
 let gridspacing = opts["griddelta"]! as! Double
 let delta = opts["delta"]! as! Double
 let epsilon = opts["epsilon"]! as! Double
@@ -486,7 +512,7 @@ func writeOBJ( _ path:String, _ subsurf:Int ) {
     do {
         try outstr.write(to: url, atomically: true, encoding: String.Encoding.utf8)
     } catch {
-        print("error writing file \(url)")
+        print("error writing obj file \(url)")
     }
 }
 

@@ -8,8 +8,8 @@ let package = Package(
     
     dependencies: [
         // Dependencies declare other packages that this package depends on.
-        .package(url: "git@github.com:artemisDiscovery/SwiftTENSURTools.git" , exact: "1.0.17"),
-        .package(url: "git@github.com:artemisDiscovery/MathTools.git" , from: "1.0.18"),
+        .package(url: "git@github.com:artemisDiscovery/SwiftTENSURTools.git" , exact: "1.0.22"),
+        .package(url: "git@github.com:artemisDiscovery/MathTools.git" , exact: "1.0.19"),
         
     ],
     
