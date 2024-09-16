@@ -17,17 +17,17 @@ let USAGE =
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15]
             [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
-            [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10]
+            [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
     "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":true, "keepprobecentered":false,
     "keepreentrant":true , 
-    "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10]
+    "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true]
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
     "delta":"float", "epsilon":"float", "volumesample":"float","skipcavities":"bool",
     "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
-    "smoothinglambda":"float" , "smoothingiters":"int"]
+    "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool"]
 
 
 // for simplicity assume paths to atomic coordinates and radii
@@ -475,7 +475,8 @@ for isurf in 0..<SUBVERTICES.count {
 
     cross = zip(cross,sgns) .map { $0.0.scale($0.1) }
     let areas = cross .map { $0.length() }
-    let fnorms = zip(cross,areas) .map { $0.0.scale(1.0/$0.1)}
+    // had a random error on linux, maybe the denominator was zero? This is the only danger spot I see ...
+    let fnorms = zip(cross,areas) .map { $0.0.scale(1.0/($0.1 + 0.000001))}
 
     // sum of centroid positions .dot face normals gives volume sample
 
@@ -614,6 +615,7 @@ func laplaciansmooth(_ subsurf:Int ) {
 }
 
 // write components out in obj format
+// if onlylargest = true, only write out largest of any type
 
 if opts["keepprobecentered"]! as! Bool {
 
@@ -626,6 +628,10 @@ if opts["keepprobecentered"]! as! Bool {
 
             writeOBJ( outpath, subsurf )
             outcount += 1
+        }
+
+        if opts["onlylargest"] as! Bool == true && outcount == 1 {
+            break
         }
     }
 
@@ -653,6 +659,10 @@ if opts["keepreentrant"]! as! Bool {
 
             writeOBJ( outpath, subsurf )
             outcount += 1
+        }
+
+        if opts["onlylargest"] as! Bool == true && outcount == 1 {
+            break
         }
     }
 
