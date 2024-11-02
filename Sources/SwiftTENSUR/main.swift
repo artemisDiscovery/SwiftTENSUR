@@ -241,6 +241,15 @@ var numthreads = 10
     }
 }
 
+// need to use fewer threads at probes step if too few atoms 
+
+var probethreads = numthreads
+
+if numthreads > Int(coordinates!.count / 10) {
+    print("\nreduce number of probe threads due to low atom count")
+    probethreads = 1
+}
+
 print("\nwill use \(numthreads) threads")
 
 
@@ -258,7 +267,7 @@ print("\tignore cavities = \(skipcav)")
 let time0 = Date().timeIntervalSince1970
 
 let surfdata = generateSurfaceProbes( coordinates:coordinates!, radii:radii!, probeRadius:proberad, 
-                    levelspacing:levelspacing, minoverlap:minoverlap, numthreads:numthreads, 
+                    levelspacing:levelspacing, minoverlap:minoverlap, numthreads:probethreads, 
                     skipCCWContours:skipcav )
 
 let probes = surfdata.0
@@ -310,7 +319,7 @@ var tridata:([Vector],[Vector],[[Int]])?
 
 do {
     tridata = try generateTriangulation( probes:probes, probeRadius:proberad, gridspacing:gridspacing, 
-    densityDelta:delta, densityEpsilon:epsilon, isoLevel:isolevel, numthreads:10, mingridchunk:20 ) 
+    densityDelta:delta, densityEpsilon:epsilon, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20 ) 
 }
 catch {
     print("triangulation code failed !")
@@ -323,7 +332,7 @@ let FACES = tridata!.2
 
 let time2 = Date().timeIntervalSince1970
 
-print("\nfinished marching cube triangulation, \(FACES.count) faces, wallclock time = \(time2 - time1)")
+print("\nfinished triangulation, \(FACES.count) faces, total wallclock for density + marching cubes = \(time2 - time0)")
 
 // find connected components
 
@@ -665,6 +674,10 @@ if opts["keepreentrant"]! as! Bool {
             break
         }
     }
+
+let time3 = Date().timeIntervalSince1970
+
+print("\nfinished surface generation, total wallclock = \(time3 - time0)")
 
 }
 
