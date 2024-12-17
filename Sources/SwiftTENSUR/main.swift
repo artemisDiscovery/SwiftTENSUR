@@ -18,16 +18,24 @@ USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <prober
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15]
             [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
             [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
+            [unitcellaxis=<'x'|'y'|'z'>] [unitcellorigin=<X>,<Y>,<Z>] 
+            [unitcellx=<size>] [unitcelly=<size>] [unitcellz=<size>]
+            [unitcellbuffer=<size>]
+
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
     "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":true, "keepprobecentered":false,
     "keepreentrant":true , 
-    "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true]
+    "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true,
+    "unitcellaxis":AXES.Z, "unitcellorigin":Vector([0.0,0.0,0.0]), 
+    "unitcellx":100.0, "unitcelly":100.0, "unitcellz":100.0, "unitcellbuffer":4.0 ]
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
     "delta":"float", "epsilon":"float", "volumesample":"float","skipcavities":"bool",
     "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
-    "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool"]
+    "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool",
+    "unitcellorigin":"vector", "unitcellx":"float", "unitcelly":"float", "unitcellz":"float",
+    "unitcellbuffer":"float", "unitcellaxis":"axis"]
 
 
 // for simplicity assume paths to atomic coordinates and radii
@@ -47,7 +55,7 @@ func parseArguments() -> ([String],[String],[String]) {
             let oarg = String(tokens[0])
             let ovalue = String(tokens[1])
             if optdict[oarg] == nil {
-                print("unrecognized option arg - exit")
+                print("unrecognized option \(oarg) - exit")
                 exit(1)
             }
 
@@ -62,11 +70,15 @@ func parseArguments() -> ([String],[String],[String]) {
     return (baseArgs,optArgs,optValues)
 }
 
+
+
 func processOptArgs( _ keys:[String], _ values:[String]) -> [String:Any] {
 
     var options = optdict
 
     for (k,v) in zip(keys,values) {
+        
+         
         if options[k] == nil {
             print("warning, unknown option \(k), skipping")
             continue
@@ -89,6 +101,23 @@ func processOptArgs( _ keys:[String], _ values:[String]) -> [String:Any] {
                 continue
             }
 
+            options[k] = value
+        }
+        else if typ == "vector" {
+            let comp = v.split { $0 == "," } .map { Double($0) }
+            if comp.contains(nil) || comp.count != 3 {
+                print("warning, illegal value \(v) for option \(k), skipping")
+                continue
+            }
+            let comp2 = comp.map { $0! }
+            options[k] = Vector(comp2)
+        }
+        else if typ == "axis" {
+            let value = ["x":AXES.X, "y":AXES.Y, "z":AXES.Z][v]
+            if value == nil {
+                print("warning, illegal value \(v) for option \(k), skipping")
+                continue
+            }
             options[k] = value
         }
         else {
@@ -202,6 +231,53 @@ let optValues = argdata.2
 
 let opts = processOptArgs(optArgs, optValues)
 
+var haveUnitCell = false
+var haveUnitCellArg = false
+
+let unitCellArgs = ["unitcellaxis", "unitcellx", "unitcelly", "unitcellz", "unitcellorigin", "unitcellbuffer"]
+let requiredUnitCellArgs = ["unitcellaxis", "unitcellx", "unitcelly", "unitcellz"] 
+let haveUnitCellArgs = unitCellArgs .map { optArgs.contains( $0 ) }
+let haveRequiredUnitCellArgs = requiredUnitCellArgs .map { optArgs.contains( $0 ) }
+
+haveUnitCellArg = haveUnitCellArgs.contains(true)
+haveUnitCell = !haveRequiredUnitCellArgs.contains(false)
+
+var unitcell:UnitCell? = nil
+
+if haveUnitCell {
+    print("\nwill use unit cell with :\nX,Y,Z dimensions = \(opts["unitcellx"]) , \(opts["unitcelly"]) , \(opts["unitcellz"])")
+
+    for (cellopt,present) in zip(unitCellArgs,haveUnitCellArgs) {
+        if !present {
+            print("\tnote that \(cellopt) has default value \(opts[cellopt])")
+        }
+    }
+
+    let ux = opts["unitcellx"] as! Double
+    let uy = opts["unitcelly"] as! Double
+    let uz = opts["unitcellz"] as! Double
+
+    let origin = opts["unitcellorigin"] as! Vector
+
+    let buffer = opts["unitcellbuffer"] as! Double
+
+    let axis = opts["unitcellaxis"] as! AXES
+
+    
+    let dimensions = [Vector([ux , 0.0 , 0.0]), Vector([0.0 , uy , 0.0]), Vector([0.0 , 0.0 , uz])]
+    unitcell = UnitCell( origin, dimensions, 
+    [buffer, buffer, buffer], axis)
+
+}
+else {
+    if haveUnitCellArg {
+        print("\nWARNING : unit cell arguments present but not all required arguments provided, unit cell not in use")
+        print("\t(required = unitcellaxis, unitcellx, unitcelly, unitcellz)")
+    }
+}
+
+
+
 
 if baseArgs.count != 4 {
     print(USAGE)
@@ -220,8 +296,35 @@ var radii:[Double]?
 
 coordinates = readCoords(coordpath)
 
-
 radii = readRadii(radiipath)
+
+var usecoordinates = Array(coordinates!)
+var useradii = Array(radii!)
+
+// need to keep track of original atom indices if we have membrane with buffer atoms
+
+var atomindices:[Int]? = nil
+
+if unitcell != nil {
+
+    let membranedata = membraneCoordinates(coordinates!, radii!, proberad, unitcell!)
+
+    let packedcoordinates = membranedata.0
+    let imgdata = membranedata.1
+    let imgradii = membranedata.2
+
+    usecoordinates = packedcoordinates + imgdata.0
+    useradii = useradii + imgradii
+
+    // imgdata.2 has inverse map, image index back to original atom index
+
+    atomindices = (0..<packedcoordinates.count) .map { $0 } 
+                + (0..<imgdata.0.count) .map { imgdata.2[$0]! }
+
+    
+
+
+}
 
 
 // get number of threads to use 
@@ -264,13 +367,25 @@ print("\tlevel spacing = \(levelspacing)")
 print("\tminimum overlap = \(minoverlap)")
 print("\tignore cavities = \(skipcav)")
 
+
+
 let time0 = Date().timeIntervalSince1970
 
-let surfdata = generateSurfaceProbes( coordinates:coordinates!, radii:radii!, probeRadius:proberad, 
+var surfdata = generateSurfaceProbes( coordinates:usecoordinates, radii:useradii, probeRadius:proberad, 
                     levelspacing:levelspacing, minoverlap:minoverlap, numthreads:probethreads, 
-                    skipCCWContours:skipcav )
+                    skipCCWContours:skipcav, unitcell:unitcell, atomindices:atomindices )
 
-let probes = surfdata.0
+var probes = surfdata.0
+
+var membraneprobedata:([Probe],[Probe],[Probe])?
+
+if unitcell != nil {
+
+    membraneprobedata = processMembraneProbes( probes, proberad, unitcell! )
+    probes = membraneprobedata!.1
+}
+
+
 
 let time1 = Date().timeIntervalSince1970
 
@@ -299,7 +414,15 @@ func writePROBES( _ path:String, _ probes:[Probe] ) {
 
 }
 
+// If membrane is in effect, the ones I want to write out are the 'keepprobes'
+
 writePROBES( probepath, probes )
+
+var useprobes = probes 
+
+if unitcell != nil {
+    useprobes = membraneprobedata!.0
+}
 
 
 let gridspacing = opts["griddelta"]! as! Double
@@ -311,6 +434,7 @@ print("\nmarching cubes triangulation, parameters : ")
 print("\tgrid spacing = \(gridspacing)")
 print("\tdensity delta = \(delta)")
 print("\tdensity epsilon = \(epsilon)")
+print("\tisolevel = \(isolevel)")
 
 
 
@@ -318,7 +442,7 @@ print("\tdensity epsilon = \(epsilon)")
 var tridata:([Vector],[Vector],[[Int]])?
 
 do {
-    tridata = try generateTriangulation( probes:probes, probeRadius:proberad, gridspacing:gridspacing, 
+    tridata = try generateTriangulation( probes:useprobes, probeRadius:proberad, gridspacing:gridspacing, 
     densityDelta:delta, densityEpsilon:epsilon, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20 ) 
 }
 catch {
@@ -326,9 +450,20 @@ catch {
     exit(0)
 }
 
-let VERTICES = tridata!.0 
-let NORMALS = tridata!.1
-let FACES = tridata!.2
+var VERTICES = tridata!.0 
+var NORMALS = tridata!.1
+var FACES = tridata!.2
+
+if unitcell != nil {
+
+    let membranetri = processMembraneTri( VERTICES, NORMALS, FACES, unitcell! )
+
+    VERTICES = membranetri.0
+    NORMALS = membranetri.1
+    FACES = membranetri.2
+
+}
+
 
 let time2 = Date().timeIntervalSince1970
 
@@ -446,6 +581,21 @@ for comp in components {
     SUBVERTICES.append( subvertices )
     SUBNORMALS.append( subnormals )
     SUBFACES.append( subfaces )
+}
+
+// 
+
+if unitcell != nil {
+
+    if SUBVERTICES.count < 4 {
+        print("\nerror, have membrane but only \(SUBVERTICES.count) surface components")
+        exit(1)
+    }
+    let membraneCompData = membraneSurfaceComponents( SUBVERTICES, SUBNORMALS, SUBFACES, unitcell! )
+
+    SUBVERTICES = membraneCompData.0
+    SUBNORMALS = membraneCompData.1
+    SUBFACES = membraneCompData.2
 }
 
 
@@ -582,9 +732,53 @@ func updateNormals(_ subsurf:Int) {
 
 }
 
+struct Edge : Hashable {
+    var v1:Int
+    var v2:Int
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(v1)
+        hasher.combine(v2)
+    }
+}
+
 func laplaciansmooth(_ subsurf:Int ) {
     let lambda = opts["smoothinglambda"]! as! Double 
     let iters = opts["smoothingiters"]! as! Int 
+
+    var boundaryVertices:Set<Int>? = nil
+
+    if unitcell != nil {
+        // identify vertices at boundary of mesh 
+
+        var edgeToFaces = [Edge:[Int]]()
+
+        for (fidx,face) in SUBFACES[subsurf].enumerated() {
+
+            for vindices in [[face[0],face[1]],[face[1],face[2]],[face[0],face[2]]] {
+                let v1 = vindices.min()!
+                let v2 = vindices.max()!
+                let edge = Edge(v1:v1, v2:v2)
+                if edgeToFaces[edge] == nil {
+                    edgeToFaces[edge] = []
+                }
+                edgeToFaces[edge]!.append(fidx)
+            
+            }
+
+        }
+
+        boundaryVertices = Set<Int>()
+
+        for edge in edgeToFaces.keys {
+
+            if edgeToFaces[edge]!.count == 1 {
+                boundaryVertices!.insert(edge.v1)
+                boundaryVertices!.insert(edge.v2)
+            }
+        }
+
+    }
 
     // need adjacency 
 
@@ -606,6 +800,9 @@ func laplaciansmooth(_ subsurf:Int ) {
 
     for iter in 0..<iters {
         for iv in 0..<SUBVERTICES[subsurf].count {
+
+            if boundaryVertices != nil && boundaryVertices!.contains(iv) { continue }
+
             var sumpos = Vector([0.0,0.0,0.0])
 
             for n in adj[iv] {
@@ -614,7 +811,7 @@ func laplaciansmooth(_ subsurf:Int ) {
 
             sumpos = sumpos.scale(1.0/Double(adj[iv].count))
 
-            let delta = sumpos.sub(SUBVERTICES[subsurf][iv]).scale(lambda)
+            var delta = sumpos.sub(SUBVERTICES[subsurf][iv]).scale(lambda)
 
             SUBVERTICES[subsurf][iv] = SUBVERTICES[subsurf][iv].add(delta)
         }
