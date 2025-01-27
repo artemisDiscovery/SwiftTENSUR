@@ -15,7 +15,7 @@ enum tensurError: Error {
 let USAGE = 
 """
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
-            [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15]
+            [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15] [probeaxes=X,Y,Z]
             [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
             [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
             [unitcellaxis=<'x'|'y'|'z'>] [unitcellorigin=<X>,<Y>,<Z>] 
@@ -25,17 +25,18 @@ USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <prober
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
-    "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":true, "keepprobecentered":false,
-    "keepreentrant":true , 
+    "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":false, "keepprobecentered":false,
+    "keepreentrant":true , "probeaxes":[AXES.X,AXES.Y,AXES.Z],
     "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true,
     "unitcellaxis":AXES.Z, "unitcellorigin":Vector([0.0,0.0,0.0]), 
     "unitcellx":100.0, "unitcelly":100.0, "unitcellz":100.0, "unitcellbuffer":4.0 ]
+
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
     "delta":"float", "epsilon":"float", "volumesample":"float","skipcavities":"bool",
     "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
     "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool",
     "unitcellorigin":"vector", "unitcellx":"float", "unitcelly":"float", "unitcellz":"float",
-    "unitcellbuffer":"float", "unitcellaxis":"axis"]
+    "unitcellbuffer":"float", "unitcellaxis":"axis", "probeaxes":"axesvector"]
 
 
 // for simplicity assume paths to atomic coordinates and radii
@@ -113,12 +114,30 @@ func processOptArgs( _ keys:[String], _ values:[String]) -> [String:Any] {
             options[k] = Vector(comp2)
         }
         else if typ == "axis" {
+            
             let value = ["x":AXES.X, "y":AXES.Y, "z":AXES.Z][v]
             if value == nil {
                 print("warning, illegal value \(v) for option \(k), skipping")
                 continue
             }
             options[k] = value
+        }
+        else if typ == "axesvector" {
+            let comp = v.split { $0 == "," } .map { String($0) }
+            var values = [AXES]()
+            for c in comp {
+
+                let v = ["x":AXES.X, "y":AXES.Y, "z":AXES.Z, "X":AXES.X, "Y":AXES.Y, "Z":AXES.Z][c]
+
+                if v == nil {
+                    print("warning, illegal value \(v) for option \(k), skipping")
+                    continue
+                }
+
+                values.append(v!)
+            }
+
+            options[k] = values
         }
         else {
             let vuse = v.lowercased() 
@@ -371,9 +390,11 @@ print("\tignore cavities = \(skipcav)")
 
 let time0 = Date().timeIntervalSince1970
 
+let theAXES = opts["probeaxes"] as! [AXES]
+
 var surfdata = generateSurfaceProbes( coordinates:usecoordinates, radii:useradii, probeRadius:proberad, 
                     levelspacing:levelspacing, minoverlap:minoverlap, numthreads:probethreads, 
-                    skipCCWContours:skipcav, unitcell:unitcell, atomindices:atomindices )
+                    skipCCWContours:skipcav, unitcell:unitcell, atomindices:atomindices, debugAXES:theAXES )
 
 var probes = surfdata.0
 
