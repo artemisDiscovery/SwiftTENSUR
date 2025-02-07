@@ -16,7 +16,7 @@ let USAGE =
 """
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15] [probeaxes=X,Y,Z]
-            [isolevel=1.0] [delta=0.1]  [epsilon=0.1] [skipcavities=yes] [volumesample=0.1]
+            [isolevel=1.0] [delta=0.15]  [epsilon=0.0] [skipcavities=no] [volumesample=0.1]
             [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
             [unitcellaxis=<'x'|'y'|'z'>] [unitcellorigin=<X>,<Y>,<Z>] 
             [unitcellx=<size>] [unitcelly=<size>] [unitcellz=<size>]
@@ -25,7 +25,7 @@ USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <prober
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
-    "delta":0.1, "epsilon":0.1, "volumesample":0.1, "skipcavities":false, "keepprobecentered":false,
+    "delta":0.15, "epsilon":0.0, "volumesample":0.1, "skipcavities":false, "keepprobecentered":false,
     "keepreentrant":true , "probeaxes":[AXES.X,AXES.Y,AXES.Z],
     "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true,
     "unitcellaxis":AXES.Z, "unitcellorigin":Vector([0.0,0.0,0.0]), 
