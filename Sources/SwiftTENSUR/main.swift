@@ -16,23 +16,24 @@ let USAGE =
 """
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15] [probeaxes=X,Y,Z]
-            [isolevel=1.0] [delta=0.15]  [epsilon=0.0] [skipcavities=no] [volumesample=0.1]
+            [isolevel=1.0] [delta=0.2] [skipcavities=yes]
+            [keepreentrant=yes] [keepprobecentered=no] [minvertices=100]
             [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
-            [unitcellaxis=<'x'|'y'|'z'>] [unitcellorigin=<X>,<Y>,<Z>] 
+            [unitcellaxis=<x|y|z>] [unitcellorigin=<X>,<Y>,<Z>] 
             [unitcellx=<size>] [unitcelly=<size>] [unitcellz=<size>]
             [unitcellbuffer=<size>]
 
 """
 
 var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
-    "delta":0.15, "epsilon":0.0, "volumesample":0.1, "skipcavities":false, "keepprobecentered":false,
+    "delta":0.15,   "skipcavities":true, "keepprobecentered":false, "minvertices":100,
     "keepreentrant":true , "probeaxes":[AXES.X,AXES.Y,AXES.Z],
     "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true,
     "unitcellaxis":AXES.Z, "unitcellorigin":Vector([0.0,0.0,0.0]), 
-    "unitcellx":100.0, "unitcelly":100.0, "unitcellz":100.0, "unitcellbuffer":4.0 ]
+    "unitcellx":100.0, "unitcelly":100.0, "unitcellz":100.0, "unitcellbuffer":9.0 ]
 
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
-    "delta":"float", "epsilon":"float", "volumesample":"float","skipcavities":"bool",
+    "delta":"float",  "skipcavities":"bool", "minvertices":"int",
     "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
     "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool",
     "unitcellorigin":"vector", "unitcellx":"float", "unitcelly":"float", "unitcellz":"float",
@@ -263,12 +264,23 @@ haveUnitCell = !haveRequiredUnitCellArgs.contains(false)
 
 var unitcell:UnitCell? = nil
 
+let buffer = opts["unitcellbuffer"] as! Double
+let levelspacing = opts["levelspacing"] as! Double
+let griddelta = opts["griddelta"] as! Double
+
+var levelspacings:[Double] = [levelspacing, levelspacing, levelspacing]
+var griddeltas:[Double] = [griddelta, griddelta, griddelta]
+var buffers:[Double] = [buffer, buffer, buffer]
+
+
+
+
 if haveUnitCell {
-    print("\nwill use unit cell with :\nX,Y,Z dimensions = \(opts["unitcellx"]) , \(opts["unitcelly"]) , \(opts["unitcellz"])")
+    print("\nwill use unit cell with :\nX,Y,Z dimensions = \(opts["unitcellx"]!) , \(opts["unitcelly"]!) , \(opts["unitcellz"]!)")
 
     for (cellopt,present) in zip(unitCellArgs,haveUnitCellArgs) {
         if !present {
-            print("\tnote that \(cellopt) has default value \(opts[cellopt])")
+            print("\tnote that \(cellopt) has default value \(opts[cellopt]!)")
         }
     }
 
@@ -278,14 +290,54 @@ if haveUnitCell {
 
     let origin = opts["unitcellorigin"] as! Vector
 
-    let buffer = opts["unitcellbuffer"] as! Double
+    let membraneaxis = opts["unitcellaxis"] as! AXES
 
-    let axis = opts["unitcellaxis"] as! AXES
+    let dimensions = [Vector([ux , 0.0 , 0.0]), Vector([0.0 , uy , 0.0]), Vector([0.0 , 0.0 , uz])]
+
+    let sizes = [ ux, uy, uz ]
 
     
-    let dimensions = [Vector([ux , 0.0 , 0.0]), Vector([0.0 , uy , 0.0]), Vector([0.0 , 0.0 , uz])]
-    unitcell = UnitCell( origin, dimensions, 
-    [buffer, buffer, buffer], axis)
+
+    // endforce level spacings that fit integer number of times into the unit cell dimensions for 
+    // non-membrane axes
+
+
+    griddeltas = [Double]()
+    levelspacings = [Double]()
+
+    for ax in 0..<3 {
+        if ax == membraneaxis.rawValue {
+            griddeltas.append(griddelta)
+            levelspacings.append(levelspacing)
+            continue
+        }
+
+        let L = round(sizes[ax]/levelspacing)
+        let lspacing = sizes[ax]/L
+        levelspacings.append(lspacing)
+        let R = round(lspacing/griddelta)
+        let gdelta = lspacing/R 
+        griddeltas.append(gdelta)
+    }
+
+    // adjust buffer in X,Y and Z
+
+    buffers = [Double]() 
+
+    for ax in 0..<3 {
+        buffers.append( round(buffer/griddeltas[ax])*griddeltas[ax] )
+    }
+
+    print("\nfor unit cell, grid deltas adjusted to \(griddeltas[0]) , \(griddeltas[1]) , \(griddeltas[2])")
+
+    print("\nfor unit cell, buffers adjusted to \(buffers[0]) , \(buffers[1]) , \(buffers[2])")
+
+
+    //unitcell = UnitCell( origin, dimensions, 
+    //                        buffers!, griddeltas!, axis)
+    
+    unitcell = UnitCell( origin:origin, dimensions:dimensions, 
+                            buffer:buffers, levelspacings:levelspacings, griddeltas:griddeltas, membraneaxis:membraneaxis)
 
 }
 else {
@@ -293,6 +345,7 @@ else {
         print("\nWARNING : unit cell arguments present but not all required arguments provided, unit cell not in use")
         print("\t(required = unitcellaxis, unitcellx, unitcelly, unitcellz)")
     }
+
 }
 
 
@@ -372,17 +425,25 @@ if numthreads > Int(coordinates!.count / 10) {
     probethreads = 1
 }
 
-print("\nwill use \(numthreads) threads")
+print("\nwill use \(numthreads) threads by default")
 
 
 
-let levelspacing = opts["levelspacing"]! as! Double
 let minoverlap = opts["minoverlap"]! as! Double
 let skipcav = opts["skipcavities"]! as! Bool
 
 print("\ngenerate probes, parameters :")
 print("\tprobe radius = \(proberad)")
-print("\tlevel spacing = \(levelspacing)")
+
+if unitcell == nil {
+    print("\tlevel spacing = \(levelspacing)")
+    print("\tgrid spacing = \(griddelta)")
+}
+else {
+    print("\tlevel spacings = \(levelspacings[0]) , \(levelspacings[1]) , \(levelspacings[2])")
+    print("\tgrid deltas = \(griddeltas[0]) , \(griddeltas[1]) , \(griddeltas[2])")
+}
+
 print("\tminimum overlap = \(minoverlap)")
 print("\tignore cavities = \(skipcav)")
 
@@ -390,23 +451,24 @@ print("\tignore cavities = \(skipcav)")
 
 let time0 = Date().timeIntervalSince1970
 
-let theAXES = opts["probeaxes"] as! [AXES]
+let theAXES = opts["probeaxes"]! as! [AXES]
+
+// 
 
 var surfdata = generateSurfaceProbes( coordinates:usecoordinates, radii:useradii, probeRadius:proberad, 
-                    levelspacing:levelspacing, minoverlap:minoverlap, numthreads:probethreads, 
-                    skipCCWContours:skipcav, unitcell:unitcell, atomindices:atomindices, debugAXES:theAXES )
+                    levelspacings:levelspacings, minoverlap:minoverlap, numthreads:probethreads, 
+                    skipCCWContours:false, atomindices:atomindices, debugAXES:theAXES )
 
 var probes = surfdata.0
 
-var membraneprobedata:([Probe],[Probe],[Probe])?
+var membraneprobes:([Probe],[Probe],[Probe])?
 
 if unitcell != nil {
+    
+    membraneprobes = processMembraneProbes( probes, proberad, unitcell! )
+    probes = membraneprobes!.0
 
-    membraneprobedata = processMembraneProbes( probes, proberad, unitcell! )
-    probes = membraneprobedata!.1
 }
-
-
 
 let time1 = Date().timeIntervalSince1970
 
@@ -439,74 +501,69 @@ func writePROBES( _ path:String, _ probes:[Probe] ) {
 
 writePROBES( probepath, probes )
 
-var useprobes = probes 
-
-if unitcell != nil {
-    useprobes = membraneprobedata!.0
-}
 
 
-let gridspacing = opts["griddelta"]! as! Double
+//if unitcell != nil {
+//    useprobes = membraneprobedata!.0
+//}
+
+
 let delta = opts["delta"]! as! Double
-let epsilon = opts["epsilon"]! as! Double
 let isolevel = opts["isolevel"]! as! Double
 
 print("\nmarching cubes triangulation, parameters : ")
-print("\tgrid spacing = \(gridspacing)")
-print("\tdensity delta = \(delta)")
-print("\tdensity epsilon = \(epsilon)")
+print("\ttarget grid spacing = \(griddelta)")
+print("\tdensity delta parameter = \(delta)")
 print("\tisolevel = \(isolevel)")
-
 
 
 
 var tridata:([Vector],[Vector],[[Int]])?
 
 do {
-    tridata = try generateTriangulation( probes:useprobes, probeRadius:proberad, gridspacing:gridspacing, 
-    densityDelta:delta, densityEpsilon:epsilon, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20 ) 
+     tridata = try generateTriangulation( probes:probes, probeRadius:proberad, gridspacing:griddelta, 
+    densityDelta:delta, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20, unitcell:unitcell ) 
+
 }
 catch {
     print("triangulation code failed !")
     exit(0)
 }
 
+let time2 = Date().timeIntervalSince1970
+
 var VERTICES = tridata!.0 
 var NORMALS = tridata!.1
 var FACES = tridata!.2
-
-if unitcell != nil {
-
-    let membranetri = processMembraneTri( VERTICES, NORMALS, FACES, unitcell! )
-
-    VERTICES = membranetri.0
-    NORMALS = membranetri.1
-    FACES = membranetri.2
-
-}
-
-
-let time2 = Date().timeIntervalSince1970
+var COMPONENTDATA:[(vertices:[Vector],normals:[Vector],faces:[[Int]],surfacetype:SurfaceType)]?
 
 print("\nfinished triangulation, \(FACES.count) faces, total wallclock for density + marching cubes = \(time2 - time0)")
 
-// find connected components
+if unitcell != nil {
 
-var adjacency = [Set<Int>]()
+    // membrane processing is currently restricive, only return the reentrant membrance components, 
+    // no extra separated ligands, cavities, etc
 
-for _ in 0..<VERTICES.count {
-    adjacency.append(Set<Int>())
+    let membranetri = processMembraneTri( VERTICES:VERTICES, NORMALS:NORMALS, FACES:FACES, PROBES:probes, unitcell:unitcell! )
+
+    if membranetri == nil {
+        print("\nerror in membrane triangulation, exit")
+        exit(1)
+    }
+
+    COMPONENTDATA = [ membranetri! ]
+
+
+}
+else {
+
+    COMPONENTDATA = processNonMembraneTri( VERTICES, NORMALS, FACES, opts  )
 }
 
-for f in FACES {
-    adjacency[f[0]].insert(f[1])
-    adjacency[f[1]].insert(f[0])
-    adjacency[f[0]].insert(f[2])
-    adjacency[f[2]].insert(f[0])
-    adjacency[f[1]].insert(f[2])
-    adjacency[f[2]].insert(f[1])
+let time3 = Date().timeIntervalSince1970
 
-}
+print("\nfinished surface processing, time = \(time3 - time2)")
+
 
 //var visited = Array(repeating:false, count:VERTICES.count)
 //
@@ -522,170 +579,45 @@ for f in FACES {
 //    }
 //}
 
-// to avoid recursion stack size issue, see if we can manage our own stack for component identification
 
-var STACK = [[Int]]()
+let componentDescription = [ SurfaceType.reentrantClosed:"Reentrant", SurfaceType.probeCenteredClosed:"Probe Centered",
+                               SurfaceType.reentrantCavity:"Cavity",  SurfaceType.undeterminedOpen:"Membrane"]
 
-var visited = Array(repeating:false, count:VERTICES.count)
-var component = Array(repeating:-1, count:VERTICES.count)
 
-var currentComponent = -1
-var unassigned:Int?
+if COMPONENTDATA != nil {
 
-while true {
-    //find first unassigned vertex
+    print("\nsurface has \(COMPONENTDATA!.count) components\n")
 
-    unassigned = nil
-
-    for iv in 0..<VERTICES.count {
-        if component[iv] < 0 {
-            unassigned = iv
-            break
-        }
-    }
-    if unassigned == nil {
-        break
+    for (cidx,component) in COMPONENTDATA!.enumerated() {
+        let desc = componentDescription[component.surfacetype]
+        print("\t\(cidx) : \(component.vertices.count) vertices, \(desc!)")
     }
 
-    currentComponent += 1
-
-    STACK.append([unassigned!,currentComponent])
-
-    while STACK.count > 0 {
-        let data = STACK.popLast()!
-        if !visited[data[0]] {
-            visited[data[0]] = true 
-            component[data[0]] = data[1]
-            for iv in adjacency[data[0]] {
-                STACK.append([iv,currentComponent])
-            }
-        }
-    }
 }
-
-var components = [[Int]]()
-
-for c in 0..<(currentComponent+1) {
-    components.append([Int]())
-}
-
-for (iv,c) in component.enumerated() {
-    components[c].append(iv)
+else {
+    print("\nunexpected error, no surface components, exit ")
+    exit(1)
 }
 
 
-print("\nsurface has \(components.count) components")
-
-// assign subsurfaces (vertices, normals, faces)
-
-
-var SUBVERTICES = [[Vector]]()
-var SUBNORMALS = [[Vector]]()
-var SUBFACES = [[[Int]]]()
-
-// sort components by decreasing size
-
-components = components .sorted { $0.count > $1.count }
-
-for comp in components {
-    let subvertindices = comp .sorted { $0 < $1 }
-    var vertexmap = Array(repeating:-1, count:VERTICES.count)
-
-    _ = subvertindices.enumerated() .map { vertexmap[$0.1] = $0.0 }
-
-    let subvertices = subvertindices .map { VERTICES[$0] }
-    let subnormals = subvertindices .map { NORMALS[$0] }
-
-    let subfaces = FACES .filter { vertexmap[$0[0]] >= 0 } 
-        .map { [vertexmap[$0[0]], vertexmap[$0[1]], vertexmap[$0[2]]] }
-
-    SUBVERTICES.append( subvertices )
-    SUBNORMALS.append( subnormals )
-    SUBFACES.append( subfaces )
-}
 
 // 
 
-if unitcell != nil {
 
-    if SUBVERTICES.count < 4 {
-        print("\nerror, have membrane but only \(SUBVERTICES.count) surface components")
-        exit(1)
-    }
-    let membraneCompData = membraneSurfaceComponents( SUBVERTICES, SUBNORMALS, SUBFACES, unitcell! )
-
-    SUBVERTICES = membraneCompData.0
-    SUBNORMALS = membraneCompData.1
-    SUBFACES = membraneCompData.2
-}
-
-
-// get signed 'volume' sample for surfaces, using specified fraction of faces
-
-let SELECT_FRAC = opts["volumesample"]! as! Double
-
-// for each subsurface, select fraction of faces, for each face compute centroid and face normal
-var subsurfVOLUME = [ Double ]()
-
-
-for isurf in 0..<SUBVERTICES.count {
-    let randomsel = SUBFACES[isurf] .filter { _ in drand48() < SELECT_FRAC }
-    let subverts = SUBVERTICES[isurf]
-    let subnorms = SUBNORMALS[isurf]
-
-    
-    let corners = randomsel .map { [subverts[$0[0]], subverts[$0[1]], subverts[$0[2]]] }
-    var centroids = corners .map { $0[0].add($0[1]).add($0[2]).scale(1.0/3.0)}
-    var center = centroids .reduce( Vector([0.0,0.0,0.0]) ) { $0 + $1 }
-    center = center.scale(1.0/Double(centroids.count))
-
-    centroids = centroids .map { $0.sub(center) }
-
-    let avenorms =   randomsel .map { subnorms[$0[0]] + subnorms[$0[1]] + subnorms[$0[2]] }
-
-    var cross = corners .map { $0[1].sub($0[0]).cross($0[2].sub($0[0])) }
-    // flip if not in agreement with vertex normals
-    let sgns = zip(cross,avenorms) .map { (x) in
-        let dot = x.0.dot(x.1)
-        if dot < 0.0 {
-            return -1.0
-        } 
-        return 1.0
-    }
-
-    cross = zip(cross,sgns) .map { $0.0.scale($0.1) }
-    let areas = cross .map { $0.length() }
-    // had a random error on linux, maybe the denominator was zero? This is the only danger spot I see ...
-    let fnorms = zip(cross,areas) .map { $0.0.scale(1.0/($0.1 + 0.000001))}
-
-    // sum of centroid positions .dot face normals gives volume sample
-
-    let vol = zip(centroids,fnorms) .map { $0.0.dot($0.1) as! Double } .reduce (0.0) { $0 + $1 }
-
-    subsurfVOLUME.append(vol)
-
-}
-
-print("\nsubsurface data:")
-for j in 0..<SUBVERTICES.count {
-    print("\t\(j) : #vertices = \(SUBVERTICES[j].count) , #faces = \(SUBFACES[j].count), volume sample = \(subsurfVOLUME[j])")
-}
-
-
-func writeOBJ( _ path:String, _ subsurf:Int ) {
+func writeOBJ( _ path:String, _ component:(vertices:[Vector],normals:[Vector],faces:[[Int]],surfacetype:SurfaceType) ) {
 
     let url = URL(fileURLWithPath: path )
     var outstr = ""
 
-    for vertex in SUBVERTICES[subsurf] {
+    for vertex in component.vertices {
         outstr += "v \(vertex.coords[0]) \(vertex.coords[1]) \(vertex.coords[2])\n"
     }
 
-    for normal in SUBNORMALS[subsurf] {
+    for normal in component.normals {
         outstr += "vn \(normal.coords[0]) \(normal.coords[1]) \(normal.coords[2])\n"
     }
 
-    for face in SUBFACES[subsurf] {
+    for face in component.faces {
         outstr += "f \(face[0]+1) \(face[1]+1) \(face[2]+1)\n"
     }
 
@@ -697,119 +629,73 @@ func writeOBJ( _ path:String, _ subsurf:Int ) {
     }
 }
 
-func updateNormals(_ subsurf:Int) {
+func updateNormals(_ component: inout (vertices:[Vector],normals:[Vector],faces:[[Int]],surfacetype:SurfaceType),
+        _ adjacency:[Set<Int>]) {
 
-    // vertex face adjaceny
-
-    var fadj = [Set<Int>]()
-
-    for iv in 0..<SUBVERTICES[subsurf].count {
-        fadj.append(Set<Int>())
-    }
-
-    for (fidx,f) in SUBFACES[subsurf].enumerated() {
-        fadj[f[0]].insert(fidx)
-        fadj[f[1]].insert(fidx)
-        fadj[f[2]].insert(fidx)
-    }
 
     // assume counter-clockwise circulation to define face normal
 
-    var fnormals = [Vector]()
-    var fareas = [Double]()
+    let facedata = component.faces .map { areaForFace(vertices:component.vertices, face:$0) }
+    var fnormals = facedata .map { $0.normal }
+    var fareas = facedata .map { $0.area }
 
     var nviolate = 0
 
-    for (fidx,f) in SUBFACES[subsurf].enumerated() {
-        let r01 = SUBVERTICES[subsurf][f[1]].sub(SUBVERTICES[subsurf][f[0]])
-        let r02 = SUBVERTICES[subsurf][f[2]].sub(SUBVERTICES[subsurf][f[0]])
-        let n = r01.cross(r02)
-        let area = n.length()
-        var nnorm = n.scale(1.0/area)
-        fareas.append(area)
-        let normsum = SUBNORMALS[subsurf][f[0]].add(SUBNORMALS[subsurf][f[1]]).add(SUBNORMALS[subsurf][f[2]])
-        if nnorm.dot(normsum) < 0.0 {
+    // find average of normals at each vertex, if violates original, reverse
+
+    var vertexSum = Array(repeating:Vector([0.0,0.0,0.0]), count:component.vertices.count )
+    
+
+    for (fidx,f) in component.faces.enumerated() {
+        for v in f {
+            vertexSum[v] = vertexSum[v].add( fnormals[fidx].scale(fareas[fidx]) )
+        }
+    }
+
+    for vidx in 0..<component.vertices.count {
+        let size = vertexSum[vidx].length()
+        if size < 0.0001 {
             nviolate += 1
-            nnorm = nnorm.scale(-1.0)
+            continue
         }
-        fnormals.append(nnorm)
+
+        let norm = vertexSum[vidx].scale(1.0/size)
+
+        if norm.dot(component.normals[vidx]) < 0.0 {
+            nviolate += 1
+            continue
+        }
+
+        component.normals[vidx] = norm
 
     }
 
-    // update vertex normals as average of adjacent face normals
-
-    for iv in 0..<SUBVERTICES[subsurf].count {
-        var avenorm = Vector([0.0, 0.0, 0.0])
-
-        for fidx in fadj[iv] {
-            avenorm = avenorm.add(fnormals[fidx])
-        }
-
-        avenorm = avenorm.scale(1.0/Double(fadj[iv].count))
-        SUBNORMALS[subsurf][iv] = avenorm
-    }
-
-    print("\nupdate vertices after laplacian smoothing, \(nviolate) faces violated ccw orientation")
+    print("\nupdate vertices after laplacian smoothing, \(nviolate) faces violated ccw orientation, were not adjusted")
 
 }
 
-struct Edge : Hashable {
-    var v1:Int
-    var v2:Int
 
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(v1)
-        hasher.combine(v2)
-    }
-}
-
-func laplaciansmooth(_ subsurf:Int ) {
+func laplaciansmooth(_ component: inout (vertices:[Vector],normals:[Vector],faces:[[Int]],surfacetype:SurfaceType) ) {
     let lambda = opts["smoothinglambda"]! as! Double 
     let iters = opts["smoothingiters"]! as! Int 
 
-    var boundaryVertices:Set<Int>? = nil
+
+    var boundaryVertices:Set<Int>?
 
     if unitcell != nil {
-        // identify vertices at boundary of mesh 
-
-        var edgeToFaces = [Edge:[Int]]()
-
-        for (fidx,face) in SUBFACES[subsurf].enumerated() {
-
-            for vindices in [[face[0],face[1]],[face[1],face[2]],[face[0],face[2]]] {
-                let v1 = vindices.min()!
-                let v2 = vindices.max()!
-                let edge = Edge(v1:v1, v2:v2)
-                if edgeToFaces[edge] == nil {
-                    edgeToFaces[edge] = []
-                }
-                edgeToFaces[edge]!.append(fidx)
-            
-            }
-
-        }
-
-        boundaryVertices = Set<Int>()
-
-        for edge in edgeToFaces.keys {
-
-            if edgeToFaces[edge]!.count == 1 {
-                boundaryVertices!.insert(edge.v1)
-                boundaryVertices!.insert(edge.v2)
-            }
-        }
-
+        let boundarydata = findBoundaryEdges( faces:component.faces )
+        boundaryVertices = Set(boundarydata.vertices)
     }
 
     // need adjacency 
 
     var adj = [Set<Int>]()
 
-    for _ in 0..<SUBVERTICES[subsurf].count {
+    for _ in 0..<component.vertices.count {
         adj.append(Set<Int>())
     }
 
-    for f in SUBFACES[subsurf] {
+    for f in component.faces {
         adj[f[0]].insert(f[1])
         adj[f[1]].insert(f[0])
         adj[f[0]].insert(f[2])
@@ -820,84 +706,75 @@ func laplaciansmooth(_ subsurf:Int ) {
     }
 
     for iter in 0..<iters {
-        for iv in 0..<SUBVERTICES[subsurf].count {
+
+        for iv in 0..<component.vertices.count {
 
             if boundaryVertices != nil && boundaryVertices!.contains(iv) { continue }
 
-            var sumpos = Vector([0.0,0.0,0.0])
-
-            for n in adj[iv] {
-                sumpos = sumpos.add(SUBVERTICES[subsurf][n])
-            }
+            var sumpos = adj[iv] .reduce ( Vector([0.0,0.0,0.0]), { $0.add(component.vertices[$1])})
 
             sumpos = sumpos.scale(1.0/Double(adj[iv].count))
 
-            var delta = sumpos.sub(SUBVERTICES[subsurf][iv]).scale(lambda)
+            var delta = sumpos.sub(component.vertices[iv]).scale(lambda)
 
-            SUBVERTICES[subsurf][iv] = SUBVERTICES[subsurf][iv].add(delta)
+            component.vertices[iv] = component.vertices[iv].add(delta)
         }
     }
+
+    updateNormals( &component, adj )
 
 
 }
 
 // write components out in obj format
-// if onlylargest = true, only write out largest of any type
 
-if opts["keepprobecentered"]! as! Bool {
+// have an open question about cavities, I have the data as to which reentrant surface a cavity is in,
+// but not returning it. Not sure how to handle
 
-    var outcount = 0
+var probectr_out = 0
+var reent_out = 0 
+var cav_out = 0
 
-    for subsurf in 0..<subsurfVOLUME.count {
-        if subsurfVOLUME[subsurf] < 0.0 {
-            let outpath = "\(rootpath).tensur.probectr.\(outcount).obj"
-            print("write probe-centered surface \(subsurf) to \(outpath)")
+for cidx in 0..<COMPONENTDATA!.count {
 
-            writeOBJ( outpath, subsurf )
-            outcount += 1
-        }
+    var component = COMPONENTDATA![cidx]
 
-        if opts["onlylargest"] as! Bool == true && outcount == 1 {
-            break
-        }
+    var outpath = ""
+
+    if component.surfacetype == SurfaceType.reentrantClosed || 
+        component.surfacetype == SurfaceType.undeterminedOpen {
+        if opts["laplaciansmoothing"]! as! Bool {
+            print("laplacian smoothing for reentrant/membrane subsurface \(reent_out)")
+            laplaciansmooth( &component )
+         }
+        
+        outpath = "\(rootpath).tensur.reent.\(reent_out).obj"
+        print("write reentrant surface \(reent_out) to \(outpath)")
+        writeOBJ( outpath, component )
+        reent_out += 1
+
     }
+    else if component.surfacetype == SurfaceType.probeCenteredClosed {
+        outpath = "\(rootpath).tensur.probectr.\(probectr_out).obj"
+        print("write probe-centered surface \(probectr_out) to \(outpath)")
+        writeOBJ( outpath, component )
+        probectr_out += 1
 
+    }
+    else if component.surfacetype == SurfaceType.reentrantCavity {
+        outpath = "\(rootpath).tensur.cavity.\(cav_out).obj"
+        print("write cavity surface \(cav_out) to \(outpath)")
+        writeOBJ( outpath, component )
+        cav_out += 1
+    }
 }
 
-if opts["keepreentrant"]! as! Bool {
 
-    var outcount = 0
+let time4 = Date().timeIntervalSince1970
 
-    for subsurf in 0..<subsurfVOLUME.count {
-        if subsurfVOLUME[subsurf] > 0.0 {
-            // invert vertex normals
+print("\nfinished surface generation, total wallclock = \(time4 - time0)")
 
-            // SUBNORMALS[subsurf] = SUBNORMALS[subsurf] .map { $0.scale(-1.0)}
 
-            if opts["laplaciansmoothing"]! as! Bool {
-                print("laplacian smoothing for subsurface \(subsurf)")
-                laplaciansmooth( subsurf )
-                print("update normals for subsurface \(subsurf)")
-                updateNormals(subsurf)
-            }
-
-            let outpath = "\(rootpath).tensur.reentrant.\(outcount).obj"
-            print("write reentrant surface \(subsurf) to \(outpath)")
-
-            writeOBJ( outpath, subsurf )
-            outcount += 1
-        }
-
-        if opts["onlylargest"] as! Bool == true && outcount == 1 {
-            break
-        }
-    }
-
-let time3 = Date().timeIntervalSince1970
-
-print("\nfinished surface generation, total wallclock = \(time3 - time0)")
-
-}
 
 
 
