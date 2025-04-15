@@ -16,24 +16,24 @@ let USAGE =
 """
 USAGE : \(CommandLine.arguments[0]) <coordinate file name>  <radii file> <proberad> <root out path>
             [levelspacing=0.5] [minoverlap=0.5]  [griddelta=0.15] [probeaxes=X,Y,Z]
-            [isolevel=1.0] [delta=0.2] [skipcavities=yes]
+            [isolevel=0.99] [delta=0.05] [epsilon=0.04] [skipcavities=yes]
             [keepreentrant=yes] [keepprobecentered=no] [minvertices=100]
             [laplaciansmoothing=yes] [smoothinglambda=0.5] [smoothingiters=10] [onlylargest=yes]
             [unitcellaxis=<x|y|z>] [unitcellorigin=<X>,<Y>,<Z>] 
             [unitcellx=<size>] [unitcelly=<size>] [unitcellz=<size>]
-            [unitcellbuffer=<size>]
+            [unitcellbuffer=<size>] [dmax=1.0] [dclamp=yes]
 
 """
 
-var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":1.0,
-    "delta":0.15,   "skipcavities":true, "keepprobecentered":false, "minvertices":100,
+var optdict:[String:Any] = [ "levelspacing":0.5, "minoverlap":0.5, "griddelta":0.15, "isolevel":0.99,
+    "delta":0.05,  "epsilon":0.04, "dmax":1.0, "dclamp":true, "skipcavities":true, "keepprobecentered":false, "minvertices":100,
     "keepreentrant":true , "probeaxes":[AXES.X,AXES.Y,AXES.Z],
     "laplaciansmoothing":true, "smoothinglambda":0.5, "smoothingiters":10, "onlylargest":true,
     "unitcellaxis":AXES.Z, "unitcellorigin":Vector([0.0,0.0,0.0]), 
     "unitcellx":100.0, "unitcelly":100.0, "unitcellz":100.0, "unitcellbuffer":9.0 ]
 
 var opttypes = [ "levelspacing":"float", "minoverlap":"float", "griddelta":"float", "isolevel":"float",
-    "delta":"float",  "skipcavities":"bool", "minvertices":"int",
+    "delta":"float", "epsilon":"float", "dmax":"float", "dclamp":"bool", "skipcavities":"bool", "minvertices":"int",
     "keepprobecentered":"bool", "keepreentrant":"bool", "laplaciansmoothing":"bool",
     "smoothinglambda":"float" , "smoothingiters":"int", "onlylargest":"bool",
     "unitcellorigin":"vector", "unitcellx":"float", "unitcelly":"float", "unitcellz":"float",
@@ -509,12 +509,18 @@ writePROBES( probepath, probes )
 
 
 let delta = opts["delta"]! as! Double
+let epsilon = opts["epsilon"]! as! Double
 let isolevel = opts["isolevel"]! as! Double
+let dmax = opts["dmax"]! as! Double
+let dclamp = opts["dclamp"]! as! Bool
 
 print("\nmarching cubes triangulation, parameters : ")
 print("\ttarget grid spacing = \(griddelta)")
 print("\tdensity delta parameter = \(delta)")
+print("\tdensity epsilon parameter = \(epsilon)")
 print("\tisolevel = \(isolevel)")
+print("\tmax density = \(dmax)")
+print("\tclamp at max density = \(dclamp)")
 
 
 
@@ -522,7 +528,8 @@ var tridata:([Vector],[Vector],[[Int]])?
 
 do {
      tridata = try generateTriangulation( probes:probes, probeRadius:proberad, gridspacing:griddelta, 
-    densityDelta:delta, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20, unitcell:unitcell ) 
+    densityDelta:delta, densityEpsilon:epsilon, isoLevel:isolevel, numthreads:numthreads, mingridchunk:20, unitcell:unitcell,
+    DMAX:dmax, densityClamp:dclamp ) 
 
 }
 catch {
@@ -643,11 +650,16 @@ func updateNormals(_ component: inout (vertices:[Vector],normals:[Vector],faces:
 
     // find average of normals at each vertex, if violates original, reverse
 
+    // take care if any elements have zero area, skip them
+
     var vertexSum = Array(repeating:Vector([0.0,0.0,0.0]), count:component.vertices.count )
     
 
     for (fidx,f) in component.faces.enumerated() {
         for v in f {
+            if fareas[fidx] == 0 {
+                continue
+            }
             vertexSum[v] = vertexSum[v].add( fnormals[fidx].scale(fareas[fidx]) )
         }
     }
@@ -670,7 +682,7 @@ func updateNormals(_ component: inout (vertices:[Vector],normals:[Vector],faces:
 
     }
 
-    print("\nupdate vertices after laplacian smoothing, \(nviolate) faces violated ccw orientation, were not adjusted")
+    print("\nupdate vertices after laplacian smoothing, \(nviolate) faces had small area or violated ccw orientation, were not adjusted")
 
 }
 
@@ -679,12 +691,32 @@ func laplaciansmooth(_ component: inout (vertices:[Vector],normals:[Vector],face
     let lambda = opts["smoothinglambda"]! as! Double 
     let iters = opts["smoothingiters"]! as! Int 
 
+    var coordsX = component.vertices .map { $0.coords[0] }
+    var coordsY = component.vertices .map { $0.coords[1] }
+    var coordsZ = component.vertices .map { $0.coords[2] }
+
+    print("\nnext component, before smoothing min,max coords = ")
+    print("\tX : \(coordsX.min()!) , \(coordsX.max()!)")
+    print("\tY : \(coordsY.min()!) , \(coordsY.max()!)")
+    print("\tZ : \(coordsZ.min()!) , \(coordsZ.max()!)")
 
     var boundaryVertices:Set<Int>?
+    var boundaryArray:[Int]?
 
     if unitcell != nil {
         let boundarydata = findBoundaryEdges( faces:component.faces )
         boundaryVertices = Set(boundarydata.vertices)
+        boundaryArray = boundarydata.vertices
+        let boundarycoords = boundaryArray! .map { component.vertices[$0].coords }
+        let minx = (boundarycoords .map { $0[0] }).min()!
+        let miny = (boundarycoords .map { $0[1] }).min()!
+        let minz = (boundarycoords .map { $0[2] }).min()!
+        let maxx = (boundarycoords .map { $0[0] }).max()!
+        let maxy = (boundarycoords .map { $0[1] }).max()!
+        let maxz = (boundarycoords .map { $0[2] }).max()!
+        print("\nhave unit cell : before smoothing, ")
+        print("\tmin X,Y,Z for boundary = \(minx) , \(miny) , \(minz)")
+        print("\tmax X,Y,Z for boundary = \(maxx) , \(maxy) , \(maxz)")
     }
 
     // need adjacency 
@@ -711,6 +743,11 @@ func laplaciansmooth(_ component: inout (vertices:[Vector],normals:[Vector],face
 
             if boundaryVertices != nil && boundaryVertices!.contains(iv) { continue }
 
+            if adj[iv].count == 0 {
+                print("\ncomponent with \(component.vertices.count) vertices, vertex \(iv) has no neighbors, pos = \(component.vertices[iv].coords)")
+                continue
+            }
+
             var sumpos = adj[iv] .reduce ( Vector([0.0,0.0,0.0]), { $0.add(component.vertices[$1])})
 
             sumpos = sumpos.scale(1.0/Double(adj[iv].count))
@@ -722,6 +759,29 @@ func laplaciansmooth(_ component: inout (vertices:[Vector],normals:[Vector],face
     }
 
     updateNormals( &component, adj )
+
+    coordsX = component.vertices .map { $0.coords[0] }
+    coordsY = component.vertices .map { $0.coords[1] }
+    coordsZ = component.vertices .map { $0.coords[2] }
+
+    print("\nnext component, after smoothing min,max coords = ")
+    print("\tX : \(coordsX.min()!) , \(coordsX.max()!)")
+    print("\tY : \(coordsY.min()!) , \(coordsY.max()!)")
+    print("\tZ : \(coordsZ.min()!) , \(coordsZ.max()!)")
+
+
+    if unitcell != nil {
+        let boundarycoords = boundaryArray! .map { component.vertices[$0].coords }
+        let minx = (boundarycoords .map { $0[0] }).min()!
+        let miny = (boundarycoords .map { $0[1] }).min()!
+        let minz = (boundarycoords .map { $0[2] }).min()!
+        let maxx = (boundarycoords .map { $0[0] }).max()!
+        let maxy = (boundarycoords .map { $0[1] }).max()!
+        let maxz = (boundarycoords .map { $0[2] }).max()!
+        print("\nhave unit cell : after smoothing, ")
+        print("\tmin X,Y,Z for boundary = \(minx) , \(miny) , \(minz)")
+        print("\tmax X,Y,Z for boundary = \(maxx) , \(maxy) , \(maxz)")
+    }
 
 
 }
